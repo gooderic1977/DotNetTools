@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Certificates.Generation;
 using Microsoft.Extensions.CommandLineUtils;
 using Microsoft.Extensions.Tools.Internal;
@@ -101,23 +102,24 @@ namespace Microsoft.AspNetCore.DeveloperCertificates.Tools
               (result == EnsureCertificateResult.Succeeded || result == EnsureCertificateResult.ValidCertificatePresent))
             {
                 var certificate = manager.ListCertificates(CertificatePurpose.HTTPS, StoreName.My, StoreLocation.CurrentUser, isValid: true).Single();
-                var trusted = manager.ListCertificates(CertificatePurpose.HTTPS, StoreName.Root, StoreLocation.CurrentUser, isValid: true).SingleOrDefault();
                 var tmpFile = Path.GetTempFileName();
 
-                if (trusted != null)
-                {
-                    reporter.Output("Certificate is already trusted");
-                }
-                else
+                var checkTrustProcess = Process.Start("security find-certificate -c localhost -a -Z -p /Library/Keychains/System.keychain");
+                checkTrustProcess.WaitForExit();
+                var output = checkTrustProcess.StandardOutput.ReadToEndAsync().Result;
+                var matches = Regex.Matches(output, "SHA-1 hash: ([0-9A-Z]+)", RegexOptions.Multiline);
+                var hashes = matches.OfType<Match>().Select(m => m.Groups[1].Value).ToList();
+
+                if (!hashes.Any(h => string.Equals(h, certificate.Thumbprint, StringComparison.Ordinal)))
                 {
                     reporter.Output($"We need to run 'sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain {tmpFile}'" +
-                        $"to trust the certificate. You will be prompted to introduce your password.");
-                }
+                        $"to trust the certificate. You will be prompted to introduce your password if the certificate is not already trusted.");
 
-                manager.ExportCertificate(certificate, tmpFile, includePrivateKey: false, password: null);
-                var process = Process.Start("sudo", $"security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain {tmpFile}");
-                process.WaitForExit();
-                result = process.ExitCode != 0 ? EnsureCertificateResult.ErrorExportingTheCertificate : result;
+                    manager.ExportCertificate(certificate, tmpFile, includePrivateKey: false, password: null);
+                    var process = Process.Start("sudo", $"security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain {tmpFile}");
+                    process.WaitForExit();
+                    result = process.ExitCode != 0 ? EnsureCertificateResult.ErrorExportingTheCertificate : result;
+                }
             }
 
             switch (result)
