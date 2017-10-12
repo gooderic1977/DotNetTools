@@ -2,8 +2,11 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Certificates.Generation;
 using Microsoft.Extensions.CommandLineUtils;
 using Microsoft.Extensions.Tools.Internal;
@@ -41,7 +44,7 @@ namespace Microsoft.AspNetCore.DeveloperCertificates.Tools
                         CommandOptionType.SingleValue);
 
                     CommandOption trust = null;
-                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                     {
                         trust = c.Option("-t|--trust",
                             "Trust the certificate on the current platform",
@@ -90,9 +93,32 @@ namespace Microsoft.AspNetCore.DeveloperCertificates.Tools
                 now,
                 now.Add(HttpsCertificateValidity),
                 exportPath.Value(),
-                trust == null ? false : trust.HasValue(),
+                trust == null ? false : trust.HasValue() && RuntimeInformation.IsOSPlatform(OSPlatform.Windows),
                 password.HasValue(),
                 password.Value());
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) &&
+              (result == EnsureCertificateResult.Succeeded || result == EnsureCertificateResult.ValidCertificatePresent))
+            {
+                var certificate = manager.ListCertificates(CertificatePurpose.HTTPS, StoreName.My, StoreLocation.CurrentUser, isValid: true).Single();
+                var trusted = manager.ListCertificates(CertificatePurpose.HTTPS, StoreName.Root, StoreLocation.CurrentUser, isValid: true).SingleOrDefault();
+                var tmpFile = Path.GetTempFileName();
+
+                if (trusted != null)
+                {
+                    reporter.Output("Certificate is already trusted");
+                }
+                else
+                {
+                    reporter.Output($"We need to run 'sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain {tmpFile}'" +
+                        $"to trust the certificate. You will be prompted to introduce your password.");
+                }
+
+                manager.ExportCertificate(certificate, tmpFile, includePrivateKey: false, password: null);
+                var process = Process.Start("sudo", $"security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain {tmpFile}");
+                process.WaitForExit();
+                result = process.ExitCode != 0 ? EnsureCertificateResult.ErrorExportingTheCertificate : result;
+            }
 
             switch (result)
             {
