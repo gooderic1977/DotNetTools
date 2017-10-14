@@ -20,11 +20,9 @@
         ]
       },
       "Microsoft.AspNetCore.DeveloperCertificates.Tools": {
-        "exclusions":{
-          "BUILD_ITEMS_FRAMEWORK": {
-            "*": "DotnetCliTool"
-          }
-        }
+        "packageTypes": [
+          "DotnetCliTool"
+        ]
       }
     }
   },
