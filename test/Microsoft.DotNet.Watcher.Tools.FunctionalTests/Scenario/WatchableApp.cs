@@ -99,7 +99,16 @@ namespace Microsoft.DotNet.Watcher.Tools.FunctionalTests
                 await PrepareAsync();
             }
 
-            var args = new[] { "run", "--" }.Concat(arguments);
+            var targetFramework = 
+#if NETCOREAPP2_0
+                "netcoreapp2.0";
+#elif NETCOREAPP2_1
+                "netcoreapp2.1";
+#else
+#error Target frameworks need to be updated
+#endif
+
+            var args = new[] { "run", "--framework", targetFramework, "--" }.Concat(arguments);
             Start(args, name);
 
             // Make this timeout long because it depends much on the MSBuild compilation speed.
